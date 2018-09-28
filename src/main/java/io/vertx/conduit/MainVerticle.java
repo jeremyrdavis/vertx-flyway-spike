@@ -1,18 +1,20 @@
 package io.vertx.conduit;
 
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.ext.auth.User;
 import io.vertx.ext.auth.jdbc.JDBCAuth;
 import io.vertx.ext.jdbc.JDBCClient;
+import io.vertx.ext.sql.ResultSet;
 import io.vertx.ext.sql.SQLConnection;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 
-import java.util.List;
 import java.util.stream.Collectors;
 
 public class MainVerticle extends AbstractVerticle {
@@ -30,6 +32,7 @@ public class MainVerticle extends AbstractVerticle {
       .put("max_pool_size", 30));
 
     authProvider = JDBCAuth.create(vertx, jdbcClient);
+    authProvider.setAuthenticationQuery("SELECT PASSWORD, PASSWORD_SALT FROM USER WHERE EMAIL = ?");
 
     Router baseRouter = Router.router(vertx);
     baseRouter.route("/").handler(this::indexHandler);
@@ -62,7 +65,7 @@ public class MainVerticle extends AbstractVerticle {
             JsonArray users = new JsonArray(res.result()
               .getResults()
               .stream()
-              .map(json -> json.getString(0))
+              .map(json -> json.getString(1))
               .sorted()
               .collect(Collectors.toList()));
             HttpServerResponse response = context.response();
@@ -84,21 +87,66 @@ public class MainVerticle extends AbstractVerticle {
 
   private void loginHandler(RoutingContext context) {
 
-    String salt = authProvider.generateSalt();
-    String password = authProvider.computeHash("jakejake", salt);
+//    String salt = authProvider.generateSalt();
+//    String password = authProvider.computeHash("jakejake", salt);
 
-    JsonObject returnValue = new JsonObject()
-      .put("login", new JsonObject()
-        .put("password", password)
-        .put("salt", salt));
-    System.out.println(returnValue);
+    JsonObject user = context.getBodyAsJson().getJsonObject("user");
+    user.put("username", "placeholder");
+
+    JsonObject authInfo = new JsonObject()
+      .put("username", user.getString("email"))
+      .put("password", user.getString("password"));
+    System.out.println(user);
 
     HttpServerResponse response = context.response();
-    response.setStatusCode(200)
-      .putHeader("Content-Type", "application/json; charset=utf-8")
-      .putHeader("Content-Length", String.valueOf(returnValue.toString().length()))
-      .end(returnValue.toString());
 
+    authProvider.authenticate(authInfo, (AsyncResult<User> ar) -> {
+      if (ar.succeeded()) {
+        System.out.println("Authentication succeeded");
+        jdbcClient.getConnection(ar2 ->{
+          if (ar2.succeeded()) {
+            SQLConnection connection = ar2.result();
+            connection.queryWithParams("SELECT * FROM USER WHERE EMAIL = ?", new JsonArray().add(user.getString("email")), fetch ->{
+              if (fetch.succeeded()) {
+                JsonObject res = new JsonObject();
+                ResultSet resultSet = fetch.result();
+                if (resultSet.getNumRows() == 0) {
+                  res.put("found", false);
+                } else {
+                  res.put("found", true);
+                  JsonArray row = resultSet.getResults().get(0);
+                  res.put("username", row.getString(1));
+                  res.put("email", row.getString(2));
+                  res.put("bio", row.getString(3));
+                  res.put("image", row.getString(4));
+                  response.setStatusCode(200)
+                    .putHeader("Content-Type", "application/json; charset=utf-8")
+                    .putHeader("Content-Length", String.valueOf(res.toString().length()))
+                    .end(res.encode());
+                }
+                response.setStatusCode(200)
+                  .putHeader("Content-Type", "text/html")
+                  .putHeader("Content-Length", String.valueOf("Not Found".length()))
+                  .end(fetch.cause().toString());
+              } else{
+                response.setStatusCode(200)
+                  .putHeader("Content-Type", "text/html")
+                  .end(fetch.cause().toString());
+              }
+            });
+          }else{
+            response.setStatusCode(200)
+              .putHeader("Content-Type", "text/html")
+              .end(ar2.cause().toString());
+          }
+        });
+
+      }else{
+        response.setStatusCode(200)
+          .putHeader("Content-Type", "text/html")
+          .end("Authentication Failed: " + ar.cause());
+      }
+    });
   }
 
   private void indexHandler(RoutingContext context) {
