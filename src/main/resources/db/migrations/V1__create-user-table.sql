@@ -1,7 +1,7 @@
-create table if not exists USER (ID INT IDENTITY PRIMARY KEY ,
-  USERNAME VARCHAR(255) NOT NULL ,
-  EMAIL VARCHAR(255) NOT NULL ,
-  BIO VARCHAR(255) ,
-  IMAGE VARCHAR(255) ,
-  PASSWORD VARCHAR(255) NOT NULL ,
-  PASSWORD_SALT VARCHAR(255));
+create table if not exists USER ("id" INT IDENTITY PRIMARY KEY ,
+  "username" VARCHAR(255) NOT NULL ,
+  "email" VARCHAR(255) NOT NULL ,
+  "bio" VARCHAR(255) ,
+  "image" VARCHAR(255) ,
+  "password" VARCHAR(255) NOT NULL ,
+  "password_salt" VARCHAR(255));

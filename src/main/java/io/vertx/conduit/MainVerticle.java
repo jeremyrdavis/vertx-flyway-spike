@@ -3,10 +3,11 @@ package io.vertx.conduit;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.http.HttpServerResponse;
+import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import io.vertx.ext.auth.User;
 import io.vertx.ext.auth.jdbc.JDBCAuth;
 import io.vertx.ext.jdbc.JDBCClient;
 import io.vertx.ext.sql.ResultSet;
@@ -41,6 +42,7 @@ public class MainVerticle extends AbstractVerticle {
     apiRouter.route("/*").handler(BodyHandler.create());
     apiRouter.get("/users").handler(this::allUsersHandler);
     apiRouter.post("/users/login").handler(this::loginHandler);
+    apiRouter.get("/user").handler(this::usersHandler);
 
     baseRouter.mountSubRouter("/api", apiRouter);
 
@@ -53,6 +55,44 @@ public class MainVerticle extends AbstractVerticle {
           future.fail(result.cause());
         }
       });
+  }
+
+  private void usersHandler(RoutingContext context) {
+
+    final String username = "Jacob";
+
+    jdbcClient.getConnection(ar -> {
+
+      SQLConnection connection = ar.result();
+      select(username, connection, result -> {
+        if (result.succeeded()) {
+          User user = result.result();
+          context.response()
+            .setStatusCode(200)
+            .putHeader("content-type", "application/json; charset=utf-8")
+            .end(Json.encodePrettily(result.result()));
+        }else{
+          context.response()
+            .setStatusCode(404).end();
+        }
+      });
+
+    });
+  }
+
+  private void select(String username, SQLConnection connection, Handler<AsyncResult<User>> resultHandler) {
+    connection.queryWithParams("SELECT * FROM USER WHERE \"username\"=?", new JsonArray().add(username), ar -> {
+      if (ar.failed()) {
+        resultHandler.handle(Future.failedFuture("User not found"));
+      } else {
+        if (ar.result().getNumRows() >= 1) {
+          JsonObject user = ar.result().getRows().get(0);
+          resultHandler.handle(Future.succeededFuture(new User(ar.result().getRows().get(0))));
+        } else {
+          resultHandler.handle(Future.failedFuture("User not found"));
+        }
+      }
+    });
   }
 
   private void allUsersHandler(RoutingContext context) {
@@ -100,6 +140,32 @@ public class MainVerticle extends AbstractVerticle {
 
     HttpServerResponse response = context.response();
 
+    authProvider.authenticate(authInfo, ar -> {
+      if (ar.succeeded()) {
+
+
+        JsonObject returnValue = new JsonObject()
+        .put("user", new JsonObject()
+          .put("email", "jake@jake.jake")
+          .put("password", "jakejake")
+          .put("token", "jwt.token.here")
+          .put("username", "jake")
+          .put("bio", "I work at statefarm")
+          .put("image", ""));
+        System.out.println(returnValue);
+
+        response.setStatusCode(200)
+        .putHeader("Content-Type", "application/json; charset=utf-8")
+        .putHeader("Content-Length", String.valueOf(returnValue.toString().length()))
+        .end(returnValue.encode());
+      }else{
+        response.setStatusCode(200)
+          .putHeader("Content-Type", "text/html")
+          .end("Authentication Failed: " + ar.cause());
+      }
+    });
+
+/*
     authProvider.authenticate(authInfo, (AsyncResult<User> ar) -> {
       if (ar.succeeded()) {
         System.out.println("Authentication succeeded");
@@ -147,6 +213,7 @@ public class MainVerticle extends AbstractVerticle {
           .end("Authentication Failed: " + ar.cause());
       }
     });
+*/
   }
 
   private void indexHandler(RoutingContext context) {
